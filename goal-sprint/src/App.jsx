@@ -27,18 +27,39 @@ function isOverdue(dueDate) {
 export default function App() {
   const [session, setSession] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
+  const [sessionExpired, setSessionExpired] = useState(false);
   const [dark, setDark] = useState(() => {
     try { return JSON.parse(localStorage.getItem("goal-sprint:dark") ?? "true"); } catch { return true; }
   });
 
   useEffect(() => {
+    // Get initial session
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
       setAuthLoading(false);
     });
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session);
+
+    // Listen for ALL auth state changes including token refresh and expiry
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === "SIGNED_OUT" || event === "USER_DELETED") {
+        setSession(null);
+        setSessionExpired(false);
+      } else if (event === "TOKEN_REFRESHED") {
+        // Token auto-refreshed — update session silently
+        setSession(session);
+        setSessionExpired(false);
+      } else if (event === "SIGNED_IN") {
+        setSession(session);
+        setSessionExpired(false);
+      } else if (!session) {
+        // Session expired and could not be refreshed — force re-login
+        setSession(null);
+        setSessionExpired(true);
+      } else {
+        setSession(session);
+      }
     });
+
     return () => subscription.unsubscribe();
   }, []);
 
@@ -47,7 +68,7 @@ export default function App() {
   }, [dark]);
 
   if (authLoading) return <Loader dark={dark} />;
-  if (!session) return <AuthPage dark={dark} />;
+  if (!session) return <AuthPage dark={dark} sessionExpired={sessionExpired} />;
   return <AgileBoard session={session} dark={dark} setDark={setDark} />;
 }
 
